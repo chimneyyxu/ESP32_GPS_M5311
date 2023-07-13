@@ -406,6 +406,10 @@ void rest_m5311(){
     gpio_set_level(M5311_POWE_GPIO,0);     
     vTaskDelay(20000 / portTICK_RATE_MS);   //释放20s
 
+    for(int i=0;i<15;i++){  //延时2.5分钟
+        vTaskDelay(10000 / portTICK_RATE_MS);   //10s
+    }
+    
     //开启m5311
     ESP_LOGW("开启m5311","11");
     gpio_set_level(M5311_POWE_GPIO,1);    
@@ -418,9 +422,13 @@ void rest_m5311(){
 
 static void m5311_task(void *arg)
 {
-
-    uint32_t check_sub=0; //当 1分钟没收到消息 ，检查是否订阅消息
-    string c_sub = "AT+MQTTSUB?\r\n";
+  
+    uint32_t check_sub=0; //当 25分钟没收到消息 ，检查是否订阅消息
+    uint32_t check_rest=0; //1小时检查时间
+    uint32_t m5311_rest = 0;
+    string c_sub = "AT+MQTTSUB?\r\n";  //是否订阅消息
+    string rest_mesg = "AT+CCLK?\r\n";//检查m5311时间
+  
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -447,13 +455,13 @@ static void m5311_task(void *arg)
     {   
       if(m5311_ready){
         int len = uart_read_bytes(M5311_UART_PORT_NUM, m5311back_datas, (BUF_SIZE - 1), 200 / portTICK_RATE_MS);
-        if(len){
-            check_sub =  0;
+        if(len){           
             m5311back_datas[len] = '\0';
             string mdata = m5311back_datas;
             ESP_LOGW("back","%s",m5311back_datas);
             // 功能（更新 实时更新 显示wifi）通知
             if(mdata.find("fun") != -1){
+              check_sub =  0;
               string jdata = mdata.substr(mdata.find("{"));
              // ESP_LOGW("json","%s",jdata.c_str());
               cJSON *pJsonRoot = cJSON_Parse(jdata.c_str());
@@ -486,6 +494,7 @@ static void m5311_task(void *arg)
             }
             // 设置 监控wifi 通知
             if(mdata.find("socpe") != -1){
+              check_sub =  0;
                string jdata = mdata.substr(mdata.find("{"));
              // ESP_LOGW("json","%s",jdata.c_str());
               cJSON *pJsonRoot = cJSON_Parse(jdata.c_str());
@@ -531,15 +540,39 @@ static void m5311_task(void *arg)
                 ESP_LOGW("loss","loss");
 
             }
+            if(mdata.find("+CCLK:") != -1){
+              string m5311_time = mdata.substr(mdata.find(",")+1);
+              m5311_time = m5311_time.substr(0,2);
+              if(m5311_time == "13"){     
+                if(m5311_rest==0){
+                  m5311_rest = 1;
+                  ESP_LOGW("m5311","rest");
+                  m5311_ready = false;
+                  rest_m5311();
+                 
+                }
+                
+              }else{
+                m5311_rest = 0;
+              }
+               ESP_LOGW("m5311_time","%s",m5311_time.c_str());
+            }
            // uart_flush(M5311_UART_PORT_NUM);          
-        } 
+        }
         check_sub ++;
-        if(check_sub >1500){  //10分钟检查一次sub
+        check_rest ++;
+        if(check_sub >7500){  //25分钟检查一次sub
           check_sub = 0;
           // string tt = "AT+CGSN=?\r\n";
           // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
           uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
         }
+        if(check_rest >20000){  //1小时检查时间 如果时间是 13 就重启 m5311 (一天一次)
+          check_rest = 0;
+          uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
+        }
+
+       
       }else{
         while(check_m5311() == ESP_FAIL){
           m5311_init();
