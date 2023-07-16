@@ -543,7 +543,7 @@ static void m5311_task(void *arg)
             if(mdata.find("+CCLK:") != -1){
               string m5311_time = mdata.substr(mdata.find(",")+1);
               m5311_time = m5311_time.substr(0,2);
-              if(m5311_time == "13"){     
+              if((m5311_time == "14")||(m5311_time == "03")){     
                 if(m5311_rest==0){
                   m5311_rest = 1;
                   ESP_LOGW("m5311","rest");
@@ -567,7 +567,7 @@ static void m5311_task(void *arg)
           // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
           uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
         }
-        if(check_rest >20000){  //1小时检查时间 如果时间是 13 就重启 m5311 (一天一次)
+        if(check_rest >12000){  //40分钟检查时间 如果时间是 13 03就重启 m5311 (一天2次)
           check_rest = 0;
           uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
         }
