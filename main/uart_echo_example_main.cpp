@@ -67,6 +67,7 @@ using namespace std; //使用命名空间 std
 uint8_t scope = 1; //1:在范围内
 uint8_t new_scope = 1;//用于判断scope有没有发生变化
 std::string socpe_wifi="";  //需要监控的wifi
+char m5311_con;  // 1：m5311连接onenet  0：断开连接
 
 static const char *TAG = "ESP32_GPS";
 
@@ -366,6 +367,7 @@ void m5311_init(){
         break;
       case 9:
           ready = 1;
+          m5311_con = 1;
           m5311_ready = true;
           break;
       default:
@@ -397,38 +399,46 @@ esp_err_t  check_m5311(){
     return re; 
 }
 
+
 //重启m5311
 void rest_m5311(){
     //关闭m5311
+
     ESP_LOGW("关闭m5311","11");
     gpio_set_level(M5311_POWE_GPIO,1);
     vTaskDelay(9000 / portTICK_RATE_MS);   //拉低9s
     gpio_set_level(M5311_POWE_GPIO,0);     
     vTaskDelay(20000 / portTICK_RATE_MS);   //释放20s
 
-    for(int i=0;i<15;i++){  //延时2.5分钟
-        vTaskDelay(10000 / portTICK_RATE_MS);   //10s
-    }
-    
-    //开启m5311
-    ESP_LOGW("开启m5311","11");
-    gpio_set_level(M5311_POWE_GPIO,1);    
-    vTaskDelay(1500 / portTICK_RATE_MS);   //拉低1.5s
-    gpio_set_level(M5311_POWE_GPIO,0);
-    vTaskDelay(1000 / portTICK_RATE_MS);
+   
 
-    m5311_init();
+      for(int i=0;i<15;i++){  //延时2.5分钟
+        vTaskDelay(10000 / portTICK_RATE_MS);   //10s
+      }
+    
+      //开启m5311
+      ESP_LOGW("开启m5311","11");
+      gpio_set_level(M5311_POWE_GPIO,1);    
+      vTaskDelay(1500 / portTICK_RATE_MS);   //拉低1.5s
+      gpio_set_level(M5311_POWE_GPIO,0);
+      vTaskDelay(1000 / portTICK_RATE_MS);
+
+      m5311_init();
+    
+   
 }
 
 static void m5311_task(void *arg)
 {
   
-    uint32_t check_sub=0; //当 25分钟没收到消息 ，检查是否订阅消息
-    uint32_t check_rest=0; //1小时检查时间
+   // uint32_t check_sub=0; //当 25分钟没收到消息 ，检查是否订阅消息
+    uint32_t check_rest=0; //25分钟检查时间
     uint32_t m5311_rest = 0;
-    string c_sub = "AT+MQTTSUB?\r\n";  //是否订阅消息
+   
+  //  string c_sub = "AT+MQTTSUB?\r\n";  //是否订阅消息
     string rest_mesg = "AT+CCLK?\r\n";//检查m5311时间
-  
+    string stop_con_mesg ="AT+MQTTDISC\r\n"; //主动断开连接
+
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -449,11 +459,12 @@ static void m5311_task(void *arg)
     }
 
     ESP_LOGI("m5311", "reday");
+    m5311_con = 1;
     m5311_ready = true;
     char *m5311back_datas = (char *) malloc(BUF_SIZE);
     while (1)
     {   
-      if(m5311_ready){
+      if(m5311_ready || (m5311_con==0)){
         int len = uart_read_bytes(M5311_UART_PORT_NUM, m5311back_datas, (BUF_SIZE - 1), 200 / portTICK_RATE_MS);
         if(len){           
             m5311back_datas[len] = '\0';
@@ -461,7 +472,7 @@ static void m5311_task(void *arg)
             ESP_LOGW("back","%s",m5311back_datas);
             // 功能（更新 实时更新 显示wifi）通知
             if(mdata.find("fun") != -1){
-              check_sub =  0;
+             // check_sub =  0;
               string jdata = mdata.substr(mdata.find("{"));
              // ESP_LOGW("json","%s",jdata.c_str());
               cJSON *pJsonRoot = cJSON_Parse(jdata.c_str());
@@ -494,7 +505,7 @@ static void m5311_task(void *arg)
             }
             // 设置 监控wifi 通知
             if(mdata.find("socpe") != -1){
-              check_sub =  0;
+            //  check_sub =  0;
                string jdata = mdata.substr(mdata.find("{"));
              // ESP_LOGW("json","%s",jdata.c_str());
               cJSON *pJsonRoot = cJSON_Parse(jdata.c_str());
@@ -527,23 +538,23 @@ static void m5311_task(void *arg)
                }  
             }
             //检查 sub
-            if(mdata.find("MQTTSUB?") != -1){
-              if(mdata.find("property/set") ==-1){   //重新订阅             
-                  uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub1.c_str(), strlen(mqtt_sub1.c_str())); 
-                  uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub2.c_str(), strlen(mqtt_sub2.c_str())); 
-                  uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub3.c_str(), strlen(mqtt_sub3.c_str()));                 
-              }
-            }
+            // if(mdata.find("MQTTSUB?") != -1){
+            //   if(mdata.find("property/set") ==-1){   //重新订阅             
+            //       uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub1.c_str(), strlen(mqtt_sub1.c_str())); 
+            //       uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub2.c_str(), strlen(mqtt_sub2.c_str())); 
+            //       uart_write_bytes(M5311_UART_PORT_NUM,mqtt_sub3.c_str(), strlen(mqtt_sub3.c_str()));                 
+            //   }
+            // }
             //掉线
             if(mdata.find("+MQTTDISC: OK") != -1){
                 m5311_ready = false;
                 ESP_LOGW("loss","loss");
-
             }
             if(mdata.find("+CCLK:") != -1){
               string m5311_time = mdata.substr(mdata.find(",")+1);
               m5311_time = m5311_time.substr(0,2);
-              if((m5311_time == "14")||(m5311_time == "03")){     
+              int tim = stoi(m5311_time);
+              if((tim == 7)||(tim == 2)){     //重启
                 if(m5311_rest==0){
                   m5311_rest = 1;
                   ESP_LOGW("m5311","rest");
@@ -555,19 +566,35 @@ static void m5311_task(void *arg)
               }else{
                 m5311_rest = 0;
               }
-               ESP_LOGW("m5311_time","%s",m5311_time.c_str());
+            //  if(15<tim && tim<22){    //关闭m5311 断开onenet连接 
+              if(12==tim){    //关闭m5311
+                if(m5311_con == 1){
+                    m5311_con = 0;
+                    m5311_ready = false;
+                    ESP_LOGW("m5311","stop");
+                    uart_write_bytes(M5311_UART_PORT_NUM,stop_con_mesg.c_str(), strlen(stop_con_mesg.c_str())); 
+                  }                 
+              }else{
+                if(m5311_con == 0){  //重启
+                    m5311_con = 1;
+                    ESP_LOGW("m5311","start");
+                    rest_m5311();
+                }                 
+              }             
+               ESP_LOGW("m5311_time","%d",tim);
             }
            // uart_flush(M5311_UART_PORT_NUM);          
         }
-        check_sub ++;
+      //  check_sub ++;
         check_rest ++;
-        if(check_sub >7500){  //25分钟检查一次sub
-          check_sub = 0;
-          // string tt = "AT+CGSN=?\r\n";
-          // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
-          uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
-        }
-        if(check_rest >12000){  //40分钟检查时间 如果时间是 13 03就重启 m5311 (一天2次)
+        //因为一天重启2次 不再检查
+        // if(check_sub >7500){  //25分钟检查一次sub  
+        //   check_sub = 0;
+        //   // string tt = "AT+CGSN=?\r\n";
+        //   // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
+        //   uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
+        // }
+        if(check_rest >7500){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
           check_rest = 0;
           uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
         }
@@ -610,7 +637,7 @@ static void wifi_scan(void *arg)
 
     while(1){
 
-        if(start_w){
+        if(start_w && m5311_con ==1){
           scan_time = 0;
           ESP_ERROR_CHECK(esp_wifi_start());
           esp_wifi_scan_start(NULL, true);
