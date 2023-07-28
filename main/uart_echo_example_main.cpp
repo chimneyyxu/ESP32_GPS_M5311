@@ -127,6 +127,10 @@ int real = 0;
 int updata = 0;
 int wifi = 0;
 
+int shi = -1;   //小时
+int fen = 0;    //分钟
+int miao = 0;   //秒
+
 void rest_m5311();
 #define BUF_SIZE (1024)
 
@@ -398,8 +402,15 @@ esp_err_t  check_m5311(){
        
     return re; 
 }
-
-
+//关闭m5311
+void stop_m5311(){
+   
+    ESP_LOGW("关闭m5311","11");
+    gpio_set_level(M5311_POWE_GPIO,1);
+    vTaskDelay(9000 / portTICK_RATE_MS);   //拉低9s
+    gpio_set_level(M5311_POWE_GPIO,0);     
+    
+}
 //重启m5311
 void rest_m5311(){
     //关闭m5311
@@ -551,42 +562,48 @@ static void m5311_task(void *arg)
                 ESP_LOGW("loss","loss");
             }
             if(mdata.find("+CCLK:") != -1){
-              string m5311_time = mdata.substr(mdata.find(",")+1);
-              m5311_time = m5311_time.substr(0,2);
-              int tim = stoi(m5311_time);
-              if((tim == 7)||(tim == 2)){     //重启
-                if(m5311_rest==0){
-                  m5311_rest = 1;
-                  ESP_LOGW("m5311","rest");
-                  m5311_ready = false;
-                  rest_m5311();
+              string m5311_time = mdata.substr(mdata.find("+CCLK:")+16);
+              ESP_LOGW("time","%s",m5311_time.c_str());
+              shi = stoi(m5311_time.substr(0,2))+8;
+              fen = stoi(m5311_time.substr(3,2));
+              miao = stoi(m5311_time.substr(6,2));
+              ESP_LOGW("tim","%d %d %d",shi,fen,miao);
+             // int tim = stoi(m5311_time);
+             // hour = stoi(m5311_time);
+             
+            //   if((tim == 7)||(tim == 2)){     //重启
+            //     if(m5311_rest==0){
+            //       m5311_rest = 1;
+            //       ESP_LOGW("m5311","rest");
+            //       m5311_ready = false;
+            //       rest_m5311();
                  
-                }
+            //     }
                 
-              }else{
-                m5311_rest = 0;
-              }
-            //  if(15<tim && tim<22){    //关闭m5311 断开onenet连接 
-              if(12==tim){    //关闭m5311
-                if(m5311_con == 1){
-                    m5311_con = 0;
-                    m5311_ready = false;
-                    ESP_LOGW("m5311","stop");
-                    uart_write_bytes(M5311_UART_PORT_NUM,stop_con_mesg.c_str(), strlen(stop_con_mesg.c_str())); 
-                  }                 
-              }else{
-                if(m5311_con == 0){  //重启
-                    m5311_con = 1;
-                    ESP_LOGW("m5311","start");
-                    rest_m5311();
-                }                 
-              }             
-               ESP_LOGW("m5311_time","%d",tim);
+            //   }else{
+            //     m5311_rest = 0;
+            //   }
+            // if(15<tim && tim<22){    //关闭m5311 断开onenet连接 
+            //  // if(12==tim){    //关闭m5311
+            //     if(m5311_con == 1){
+            //         m5311_con = 0;
+            //         m5311_ready = false;
+            //         ESP_LOGW("m5311","stop");
+            //         uart_write_bytes(M5311_UART_PORT_NUM,stop_con_mesg.c_str(), strlen(stop_con_mesg.c_str())); 
+            //       }                 
+            //   }else{
+            //     if(m5311_con == 0){  //重启
+            //         m5311_con = 1;
+            //         ESP_LOGW("m5311","start");
+            //         rest_m5311();
+            //     }                 
+            //   }             
+              // ESP_LOGW("m5311_time","%d",tim);
             }
            // uart_flush(M5311_UART_PORT_NUM);          
         }
       //  check_sub ++;
-        check_rest ++;
+        //check_rest ++;
         //因为一天重启2次 不再检查
         // if(check_sub >7500){  //25分钟检查一次sub  
         //   check_sub = 0;
@@ -594,17 +611,21 @@ static void m5311_task(void *arg)
         //   // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
         //   uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
         // }
-        if(check_rest >7500){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
-          check_rest = 0;
+         if(shi == -1){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
           uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
         }
+        // if(check_rest >7500){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
+        //   check_rest = 0;
+        //   uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
+        // }
 
        
       }else{
-        while(check_m5311() == ESP_FAIL){
-          m5311_init();
-        }
-        m5311_ready = true;
+        rest_m5311();
+        // while(check_m5311() == ESP_FAIL){
+        //   m5311_init();
+        // }
+        // m5311_ready = true;
       }    
       vTaskDelay(200 / portTICK_RATE_MS);
     }
@@ -760,6 +781,42 @@ static void fun_task(void *arg){
     }
     
 }
+
+static void timer_task(void *arg)  // 时钟
+{
+    while (1)
+    {
+      if(shi != -1){
+        miao++;
+        if(miao >= 60){
+          fen ++;
+          miao = 0;
+        }
+        if(fen>=60) {
+            fen = 0;
+            shi++;
+        }
+        if(shi > 24) shi = 24 - shi;
+      }
+      if(shi>22 || shi<7){      
+          if(m5311_con == 1){
+              m5311_con = 0;
+              m5311_ready = false;
+              stop_m5311();
+              ESP_LOGW("tim","stop m5377");
+            }
+      }else if(shi != -1 && m5311_con ==0){
+        m5311_con = 1;
+      }
+      if(shi== 19 && fen ==30 && miao ==30){
+        shi = -1;
+      }
+      ESP_LOGW("tim","%d %d %d",shi,fen,miao);
+      vTaskDelay(1000/portTICK_RATE_MS);
+    }
+    
+
+}
 /******************* C 语言 用下面2个函数 *****************/
 
 /*在字符串中查找字符，返回查到的第一个下标，否则返回-1
@@ -868,6 +925,6 @@ extern "C" void app_main()
   xTaskCreate(gps_task, "gps_task", 1024*5, NULL, 2, NULL);
   xTaskCreate(m5311_task, "m5311_task", 1024*5, NULL, 15, NULL);
   xTaskCreate(fun_task, "fun_task", 1024*2, NULL, 12, NULL);
-
+  xTaskCreate(timer_task, "timer_task", 1024*2, NULL, 16, NULL);
  
 }
