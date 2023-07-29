@@ -67,7 +67,7 @@ using namespace std; //使用命名空间 std
 uint8_t scope = 1; //1:在范围内
 uint8_t new_scope = 1;//用于判断scope有没有发生变化
 std::string socpe_wifi="";  //需要监控的wifi
-char m5311_con;  // 1：m5311连接onenet  0：断开连接
+char m5311_con = 1;  // 1：m5311连接onenet  0：断开连接
 
 static const char *TAG = "ESP32_GPS";
 
@@ -611,7 +611,7 @@ static void m5311_task(void *arg)
         //   // uart_write_bytes(M5311_UART_PORT_NUM,tt.c_str(), strlen(tt.c_str())); 
         //   uart_write_bytes(M5311_UART_PORT_NUM,c_sub.c_str(), strlen(c_sub.c_str())); 
         // }
-         if(shi == -1){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
+         if(shi == -1){  //如果 shi = -1 读取时间
           uart_write_bytes(M5311_UART_PORT_NUM,rest_mesg.c_str(), strlen(rest_mesg.c_str())); 
         }
         // if(check_rest >7500){  //25分钟检查时间 如果时间是 07 02（真实时间+8 （10点 15点））就重启 m5311 (一天2次)  晚上23点 到 明早 6点 关闭(15 22)
@@ -620,12 +620,11 @@ static void m5311_task(void *arg)
         // }
 
        
-      }else{
-        rest_m5311();
-        // while(check_m5311() == ESP_FAIL){
-        //   m5311_init();
-        // }
-        // m5311_ready = true;
+      }else{       
+        while(check_m5311() == ESP_FAIL){
+          m5311_init();
+        }
+        m5311_ready = true;
       }    
       vTaskDelay(200 / portTICK_RATE_MS);
     }
@@ -798,7 +797,8 @@ static void timer_task(void *arg)  // 时钟
         }
         if(shi > 24) shi = 24 - shi;
       }
-      if(shi>22 || shi<7){      
+      if(shi>22 && shi<7){      
+      
           if(m5311_con == 1){
               m5311_con = 0;
               m5311_ready = false;
@@ -806,11 +806,9 @@ static void timer_task(void *arg)  // 时钟
               ESP_LOGW("tim","stop m5377");
             }
       }else if(shi != -1 && m5311_con ==0){
-        m5311_con = 1;
+        esp_restart();
       }
-      if(shi== 19 && fen ==30 && miao ==30){
-        shi = -1;
-      }
+    
       ESP_LOGW("tim","%d %d %d",shi,fen,miao);
       vTaskDelay(1000/portTICK_RATE_MS);
     }
