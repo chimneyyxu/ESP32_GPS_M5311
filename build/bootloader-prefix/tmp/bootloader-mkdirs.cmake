@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 file(MAKE_DIRECTORY
-  "E:/esp/esp-idf/components/bootloader/subproject"
+  "E:/esp/esp-idf/esp-idf/components/bootloader/subproject"
   "F:/esp_project/ESP32_GPS_M5311/build/bootloader"
   "F:/esp_project/ESP32_GPS_M5311/build/bootloader-prefix"
   "F:/esp_project/ESP32_GPS_M5311/build/bootloader-prefix/tmp"
@@ -17,3 +17,6 @@ set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
     file(MAKE_DIRECTORY "F:/esp_project/ESP32_GPS_M5311/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
+if(cfgdir)
+  file(MAKE_DIRECTORY "F:/esp_project/ESP32_GPS_M5311/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+endif()

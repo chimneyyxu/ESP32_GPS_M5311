@@ -1,3 +1,5 @@
+/*新增 wifi scan1任务，1小时定时唤醒一次检查是否在wifi范围内，如果在则进入休眠，否则（或者3小时一次）连接onnet上传数据*/
+
 /* UART Echo Example
 
   c语言求 gps 检验值
@@ -33,6 +35,9 @@
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 #include "esp_storage.h"
+
+#include "esp_sleep.h"
+
 /**
  * This is an example which echos any data it receives on configured UART back to the sender,
  * with hardware flow control turned off. It does not use UART driver event queue.
@@ -56,6 +61,7 @@
 #define M5311_UART_BAUD_RATE     115200
 #define M5311_POWE_GPIO     GPIO_NUM_13  
 
+#define portTICK_RATE_MS              portTICK_PERIOD_MS
 static const adc_channel_t chan = ADC_CHANNEL_7;     //GPIO35 if ADC1
 static const adc_bits_width_t wid = ADC_WIDTH_BIT_12;
 static const adc_atten_t att = ADC_ATTEN_DB_2_5;
@@ -66,6 +72,8 @@ using namespace std; //使用命名空间 std
 
 uint8_t scope = 1; //1:在范围内
 uint8_t new_scope = 1;//用于判断scope有没有发生变化
+uint8_t sleep_num; //休眠次数
+TaskHandle_t gpsHandle; //gps任务句
 std::string socpe_wifi="";  //需要监控的wifi
 char m5311_stop = 0;  // 1：m5311关闭  0：开启
 
@@ -180,7 +188,7 @@ void uart_init(){
 static void gps_task(void *arg)
 {
      
-     vTaskDelay(1000 / portTICK_RATE_MS);
+   //  vTaskDelay(1000 / portTICK_RATE_MS);
      std::string a = "$PCAS03,0,0,0,0,9,0,0,0,0,0,,,0,0,,,,0*3B\r\n";
      uart_write_bytes(GPS_UART_PORT_NUM, a.c_str(), a.length());
      vTaskDelay(500 / portTICK_RATE_MS);
@@ -290,6 +298,7 @@ void m5311_init(){
    uint8_t num = 1;
   uint8_t ready = 0;
    while(ready == 0){
+      
       switch (num)      // err 超过5次 将重启 m5311
       {
       case 1:
@@ -724,6 +733,129 @@ static void wifi_scan(void *arg)
 }
 
 
+static void wifi_scan1(void *arg)
+{
+
+   uint32_t v; //电池电量
+  /*wifi scan 需要的变量*/
+    string scan_data="";
+    string wifi_name="";
+    string wifi_name_1="";
+    string ssid;
+    string rssi;
+    char mac[20];
+
+/******************************************************************/
+/*初始化esp32 wifi 并开启扫描*/
+    ESP_ERROR_CHECK(esp_netif_init());
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+    assert(sta_netif);
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    uint16_t scan_number = 5;     //wifi扫描结果最大数量
+    wifi_ap_record_t ap_info[scan_number];
+    uint16_t ap_count = 0;
+    memset(ap_info, 0, sizeof(ap_info));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));        
+    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_scan_start(NULL, true);
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&scan_number, ap_info));
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
+    ESP_LOGI(TAG, "Total APs scanned = %u", ap_count);
+    esp_wifi_scan_stop();
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    new_scope = 0;
+    for (int i = 0; (i < scan_number) && (i < ap_count); i++) {
+             // ESP_LOGI(TAG, "SSID \t%s RSSI \t%d", ap_info[i].ssid,ap_info[i].rssi);
+      ssid =(char *) ap_info[i].ssid;
+      if(socpe_wifi == ssid || socpe_wifi ==""){
+          new_scope = 1;               
+                //ESP_LOGI(TAG, "in_here");
+      }
+      sprintf(mac,"%x:%x:%x:%x:%x:%x",ap_info[i].bssid[0],ap_info[i].bssid[1],ap_info[i].bssid[2],ap_info[i].bssid[3],ap_info[i].bssid[4],ap_info[i].bssid[5]);             
+      rssi =std::to_string(ap_info[i].rssi);
+      scan_data  = scan_data + mac + "," +rssi;
+      if(scan_number -i >1 )  scan_data = scan_data + "|";  
+      wifi_name  = wifi_name + ssid +"," + rssi +";";
+    }
+    if(new_scope ==0 || sleep_num==3){   //不在范围内 和休眠次数大于3 发送
+
+      vTaskSuspend( gpsHandle);
+      /*开启m5311 并且确保m5311 有连接上*/
+      gpio_config_t io_conf = {};
+      io_conf.intr_type = GPIO_INTR_DISABLE;
+      io_conf.mode = GPIO_MODE_OUTPUT;
+      io_conf.pin_bit_mask = 1ULL << M5311_POWE_GPIO;        
+      io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;   
+      io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+      gpio_config(&io_conf);
+
+      //开启m5311
+    
+      gpio_set_level(M5311_POWE_GPIO,1);
+      vTaskDelay(1500 / portTICK_RATE_MS);
+      gpio_set_level(M5311_POWE_GPIO,0);
+      vTaskDelay(1000 / portTICK_RATE_MS);
+   
+   /**** 检查m5311是否已连上onenet 如没有 就 init()****/ 
+      while(check_m5311() == ESP_FAIL){
+        m5311_init();
+      }
+      ESP_LOGI("m5311", "reday");
+      vTaskDelay(5000 / portTICK_RATE_MS);   //5s
+
+      if(new_scope ==0){     //不在范围内 
+          string n_socpe = socpe_wifi_n;
+          n_socpe.replace(n_socpe.find("socp_wifi"),9,socpe_wifi);
+          n_socpe.replace(n_socpe.find("int"),3,to_string(scope));
+          string a = tohex(n_socpe);
+          string socpe_dd = SUB_pub_socp_wifi;
+          socpe_dd = socpe_dd.replace(socpe_dd.find("88"),2,to_string((a.size())/2)) + a +"\r\n";
+          uart_write_bytes(M5311_UART_PORT_NUM,socpe_dd.c_str(), strlen(socpe_dd.c_str()));
+
+      }
+         scan_number = 5;
+    memset(ap_info, 0, sizeof(ap_info));         
+    // wifi_flag=1;
+    wifi_new = 1;
+    wifidata = SUB_pub_wifi;
+    wifidata =  wifidata.replace(wifidata.find("scan_data"),9,scan_data);
+    scan_data = "";
+
+    wifi_name_data = SUB_pub_wifi_name;
+    wifi_name_1 = wifi_n;
+    wifi_name_1 = wifi_name_1.replace(wifi_name_1.find("wifi_name_data"),14,wifi_name);
+  //  ESP_LOGI(TAG, "wifi_name_data:%s", wifi_name_1.c_str());
+    string a = tohex(wifi_name_1);
+    wifi_name_data = wifi_name_data.replace(wifi_name_data.find("88"),2,to_string((a.size())/2)) + a +"\r\n";
+    wifi_name  = "";
+
+   
+     //电量adc数据格式化到gps 判断 gpsdata是否不为空
+     if(gpsdata != ""){
+         esp_adc_cal_get_voltage(chan, &adc_chars, &vol);
+          v = vol * 3.25;       
+        gpsdata = gpsdata.replace(gpsdata.find("vol"),3,to_string(v));       
+        //发送GPS adc数据
+        uart_write_bytes(M5311_UART_PORT_NUM,gpsdata.c_str(), strlen(gpsdata.c_str())); 
+     }
+     
+      //发送wifi数据
+      uart_write_bytes(M5311_UART_PORT_NUM,wifi_name_data.c_str(), strlen(wifi_name_data.c_str())); 
+      //发送wifi定位数据
+      uart_write_bytes(M5311_UART_PORT_NUM,wifidata.c_str(), strlen(wifidata.c_str()));
+      wifi_new = 0;
+      updata = 0;         
+      /*关闭m5311 进入 DeepSleep模式*/
+      stop_m5311();                 
+    }
+    
+  ESP_LOGW("start","sleep");
+  ESP_ERROR_CHECK(gpio_hold_en(M5311_POWE_GPIO));
+  ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(1000000LL * 3600) ); //1小时
+  esp_deep_sleep_start();
+
+}
 static void fun_task(void *arg){
   uint32_t v;
     while (1)
@@ -888,7 +1020,7 @@ static void timer_task(void *arg)  // 时钟
 //   }	
 // }
 
-
+/*
 extern "C" void app_main()
 {
 
@@ -923,4 +1055,61 @@ extern "C" void app_main()
   xTaskCreate(fun_task, "fun_task", 1024*2, NULL, 12, NULL);
   xTaskCreate(timer_task, "timer_task", 1024*2, NULL, 16, NULL);
  
+}
+*/
+extern "C" void app_main(){
+
+   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+        printf("Not timer wakeup\n");
+    } else {
+      ESP_ERROR_CHECK(gpio_hold_dis(M5311_POWE_GPIO));
+      printf("timer wakeup\n");
+
+    }
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+  ESP_ERROR_CHECK( ret );
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+  char socpe_wifi_1[50];
+  ret = esp_storage_get("socpe_wifi", socpe_wifi_1, sizeof(socpe_wifi_1));
+  if(ret == ESP_OK){
+    ESP_LOGW("stroge","%s",socpe_wifi_1);
+     socpe_wifi = socpe_wifi_1;
+  }
+
+  
+  ret = esp_storage_get("sleep_num", &sleep_num, sizeof(sleep_num));
+  if(ret == ESP_OK){
+    ESP_LOGW("stroge","sleep_num:%d",sleep_num);
+    if(sleep_num<4) {
+      sleep_num++;
+      esp_storage_set("sleep_num", &sleep_num, sizeof(sleep_num));
+
+    }
+    else{
+      sleep_num = 0;
+      esp_storage_set("sleep_num", &sleep_num, sizeof(sleep_num));
+    }
+  }
+
+
+  uart_init();
+
+  adc1_config_width(wid);
+  adc1_config_channel_atten((adc1_channel_t)chan, att);
+
+  esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, att, wid, 1100, &adc_chars);
+  ESP_LOGW("ADC","%d",val_type);
+  esp_adc_cal_get_voltage(chan, &adc_chars, &vol);
+  ESP_LOGW("ADC_vol","%d",vol);
+
+  xTaskCreate(gps_task, "gps_task", 1024*5, NULL, 10, &gpsHandle);
+  vTaskDelay(50000 / portTICK_RATE_MS);   //50s
+  xTaskCreate(wifi_scan1, "wifi_scan1", 1024*5, NULL, 2, NULL);
+
 }

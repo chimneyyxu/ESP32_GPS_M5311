@@ -23,7 +23,7 @@
 #include <esp_system.h>
 #include "esp_sntp.h"
 #include "esp_log.h"
-
+#include "esp_mac.h"
 #include "esp_utils.h"
 
 static const char *TAG = "esp_utils";
@@ -39,7 +39,7 @@ static void show_system_info_timercb(void *timer)
     esp_wifi_get_channel(&primary, &second);
     esp_wifi_sta_get_ap_info(&ap_info);
 
-    ESP_LOGI(TAG, "System information sta_mac: " MACSTR ", channel: [%d/%d], rssi: %d, free_heap: %u, minimum_heap: %u",
+    ESP_LOGI(TAG, "System information sta_mac: "MACSTR", channel: [%d/%d], rssi: %d, free_heap: %u, minimum_heap: %u",
              MAC2STR(sta_mac), primary, second, ap_info.rssi, esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
 
     if (!heap_caps_check_integrity_all(true)) {
